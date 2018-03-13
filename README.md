@@ -1,4 +1,4 @@
-# IoT.kyotoスターターパック向け AWS環境構築
+# ServerlessFramework デモサンプル
 
 ServerlessFrameworkを利用して、簡単にBasicなAWS環境を構築します
 
