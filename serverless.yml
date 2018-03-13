@@ -1,0 +1,93 @@
+
+service: iot-serverless-sample
+
+# 基本設定
+# accountIDは適宜修正してください
+custom:
+  defaultStage: prod
+  defaultRegion: ap-northeast-1
+  accountID: xxxxxxxxxx
+
+# LambdaのruntimeやiamRoleなどの設定
+# iamRole
+#   DynamoDB TableName:iot-serverless-sampleに対してGet/Query/Put/Updateを許可
+#   Kinesis StreamName:iot-serverless-kinesisに対してDescribeStream/GetRecords/GetShardIterator/ListStreamsを許可
+provider:
+  name: aws
+  runtime: nodejs6.10
+  stage: ${opt:stage, self:custom.defaultStage}
+  region: ${opt:region, self:custom.defaultRegion}
+  iamRoleStatements:
+    - Effect: "Allow"
+      Resource: "arn:aws:dynamodb:${self:provider.region}:*:table/iot-serverless-dynamo"
+      Action:
+        - "dynamodb:GetItem"
+        - "dynamodb:PutItem"
+        - "dynamodb:UpdateItem"
+        - "dynamodb:Query"
+    - Effect: "Allow"
+      Resource: "arn:aws:kinesis:${self:provider.region}:*:stream/iot-serverless-kinesis"
+      Action:
+        - "kinesis:DescribeStream"
+        - "kinesis:GetRecords"
+        - "kinesis:GetShardIterator"
+        - "kinesis:ListStreams"
+
+# Lambdaのhandlerやevent(トリガー)の設定
+# LambdaFunctionName:putDynamoDBfromKinesisはkinesis経由でDynamoDBにPUTするLambda
+# LambdaFunctionName:putDynamoDBfromIoTはAWSIoT経由でDynamoDBにPUTするLambda
+# KinesisのARNにアカウント番号が入っているので、アカウントごとに修正する必要があります ※なんとかして直接書かずに済む方法が模索中
+# KinesisかAWSIoTのどっちかだけ必要な場合が多いと思うのでコメントアウトしてください
+functions:
+  putDynamoDBfromKinesis:
+    handler: index.put_dynamo_form_kinesis
+    description: iot-serverless-sample LambdaFunction from Kinesis
+    events:
+      - stream:
+          arn: "arn:aws:kinesis:${self:provider.region}:${self:custom.accountID}:stream/iot-serverless-kinesis"
+          batchSize: 100
+          startingPosition: LATEST
+  putDynamoDBfromIoT:
+    handler: index.put_dynamo_from_iot
+    description: iot-serverless-sample LambdaFunction from IoT
+    events:
+      - iot:
+          name: LambdaInvokeRole
+          description: AWSIoTからLambdaをinvokeする
+          sql: "SELECT * FROM 'iot-serverless-topic'"
+          sqlVersion: beta
+
+# その他各種サービスリソースの設定
+# 初回デプロイ時にDynamoDBのテーブルとKinesisDataStreamsを作成している
+# DynmoDB
+#   TableName: iot-serverless-dynamo
+#   HashKey: deviceID(string)
+#   RangeKey: record_time(string)
+#   Capacity: Read/Writeともに1 必要に応じて調整してください
+# KinesisDataStreams
+#   StreamName: iot-serverless-kinesis
+#   Shard: 1
+resources:
+  Resources:
+    DynamoDB:
+      Type: "AWS::DynamoDB::Table"
+      Properties:
+        TableName: iot-serverless-dynamo
+        AttributeDefinitions:
+          - AttributeName: deviceID
+            AttributeType: S
+          - AttributeName: record_time
+            AttributeType: S
+        KeySchema:
+          - AttributeName: deviceID
+            KeyType: HASH
+          - AttributeName: record_time
+            KeyType: RANGE
+        ProvisionedThroughput:
+          ReadCapacityUnits: 1
+          WriteCapacityUnits: 1
+    KinesisDataStreams:
+      Type: "AWS::Kinesis::Stream"
+      Properties:
+        Name: "iot-serverless-kinesis"
+        ShardCount: 1
